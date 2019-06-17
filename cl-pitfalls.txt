@@ -1,0 +1,477 @@
+From comp.lang.lisp Thu Oct 26 16:06:28 1995
+Newsgroups: comp.lang.lisp
+Path: edcogsci!jeff
+From: jeff@cogsci.ed.ac.uk (Jeff Dalton)
+Subject: Revised Pitfall list
+Message-ID: <DH17Jy.GrH@cogsci.ed.ac.uk>
+Organization: Centre for Cognitive Science, Edinburgh, UK
+Date: Thu, 26 Oct 1995 01:16:43 GMT
+Lines: 466
+
+I've added a number of new items and revised others to make
+the presentation clearer or to fix mistakes.  The result is
+a bit long, and I'm considering ways to make it easier to deal
+with.  Suggestions are welcome.
+
+----------------------------------------------------------------------
+Common Lisp Pitfalls
+
+Last updated: Thu Oct 26 00:56:33 1995 by Jeff Dalton
+
+This is a list of "pitfalls": little traps that can catch even
+experienced programmers.  They often involve somewhat counterintuitive
+aspects of Common Lisp that tend to be revealed only by a careful
+reading of CLtL (or of the ANSI standard).  However, pitfalls do not
+necessarily represent defects in the language.
+
+The list was written by Jeff Dalton <J.Dalton@ed.ac.uk>.  Please
+send suggestions and corrections.  Even the best Lisp books can
+fall into pitfalls or get some of these issues wrong.  That makes
+it more important for lists like this to be correct, and for that
+I need your help.
+
+Another pitfall list, containing parts of this one, can be found in
+the "Frequently Asked Questions" list of Comp.lang.lisp.
+
+Contents:
+ * Assorted pitfalls
+ * Sort pitfalls
+ * Function vs eq
+ * Iteration vs closures
+ * Limits
+ * Definitions and declarations
+ * Packages
+ * CLOS
+ * Acknowledgments
+
+All references to CLtL are to the 2nd edition.
+
+Assorted pitfalls.
+
+  * The result of many non-destructive functions such as REMOVE
+    and UNION can share structure with an argument; so you can't
+    rely on them to make a completely new list.
+
+  * APPEND copies all of its arguments _except the last_.
+    CONCATENATE copies all of its (sequence) arguments.
+
+  * SORT is (usually) destructive.
+
+    So, for instance, (SORT (REMOVE ...) ...) may not be safe.
+
+  * Destructive functions that you think would modify CDRs might
+    modify CARs instead.  (Eg, NREVERSE.)
+
+  * The value of a &REST parameter might not be a newly constructed
+    list.  (Remember that the function might be called using APPLY,
+    and so an existing list might be available.)  Therefore it is not
+    safe to modify the list, and the following is _not_ equivalent to
+    the LIST function: (lambda (&rest x) x).  [See CLtL p 78, which is
+    not as clear as it might be.]
+
+  * Many of the functions that treat lists as sets don't guarantee
+    the order of items in the result: UNION, INTERSECTION, SET-DIFFERENCE,
+    SET-EXCLUSIVE-OR, and their destructive "N" versions.
+
+  * REMOVE- and DELETE-DUPLICATES keep the _later_ (in the sequence)
+    of two matching items.  To keep the earlier items, use :FROM-END T.
+    Remembering that :FROM-END exists may make it easier to remember
+    the default behavior.
+
+  * Array elements might not be initialized to NIL.  Eg,
+
+       (make-array 10) => #(0 0 0 0 0 0 0 0 0 0)
+
+    Use (make-array 10 :initial-element nil).
+
+  * READ-FROM-STRING has some optional arguments before the
+    keyword parameters.  If you want to supply some keyword
+    arguments, you have to give all of the optional ones too.
+
+    Other functions with this property: WRITE-STRING, WRITE-LINE,
+    PARSE-NAMESTRING.
+
+  * EQUAL compares both vectors and structs with EQ.  EQUALP descends
+    vectors and structs but has other properties (such as ignoring
+    character case) that may make it inappropriate.  EQUALP does not
+    descend instances of STANDARD-CLASSes.
+
+  * EQ may return false for numbers and characters even when they seem
+    to be provably the same.  The aim is to allow a greater range of
+    optimizations, especially in compiled code, by not requiring that
+    numbers and characters behave like proper objects-with-identity.
+    CLtL p 104 gives an extreme example: (let ((x 5)) (eq x x)) might
+    return false.
+
+  * Some Common lisp operators use EQ, rather than the usual EQL,
+    in a way that cannot be overridden: CATCH, GET, GET-PROPERTIES,
+    GETF, REMF, REMPROP, and THROW.  See table 5-11 on p 5-57 of the
+    standard.
+
+  * The function LIST-LENGTH is not a faster, list-specific version
+    of the sequence function LENGTH.  It is list-specific, but it's
+    slower than LENGTH because it can handle circular lists.
+
+  * (FORMAT T ...) interprets T as *STANDARD-OUTPUT*
+    All other I/O functions interpret T as *TERMINAL-IO*.
+
+  * COERCE will not perform all of the conversions that are available
+    in the language.  There are good reasons for that, but some cases
+    may be surprising.  For instance, COERCE will convert a single-character
+    string to a character, but it will not convert a character to a 
+    single-character string.  For that you need STRING.
+
+  * The DIRECTORY function returns the TRUENAME of each item in the
+    result, which can be slow.  If you don't need the truenames, on
+    some systems it's faster to run "/bin/ls" and read its standard
+    output (if your Lisp supports this).
+
+  * The following trick for intercepting all unwinds is not portable
+    and might not be allowed at all:
+
+     (tagbody (unwind-protect (do-some-stuff)
+                ;; Intercept all unwinds, ha ha!
+                (go where-I-say))
+       where-I-say
+        ;; We always get here.
+        (do-some-more-stuff))
+
+    Informally: once an unwind to a certain point has begun, it must
+    always go at least that far.  [See CLtL pages 189-192.]  Similar
+    tricks using THROW or RETURN-FROM suffer the same fate.  I used 
+    GO above because I think that makes the intention clearer.
+
+  * Remember that there are "potential numbers" and that they are
+    reserved tokens [CLtL pages 516-520].  Normally, only odd things
+    such as 1.2.3 or 3^4/5 are "potnums", but when *READ-BASE* is
+    greater than 10, many more tokens are effected.  (For real fun,
+    set your read base to 36.)
+
+SORT pitfalls.
+
+  It may seem odd to have a whole section devoted to SORT, but I've
+  seen so many erroneous SORT calls that I've decided it's necessary.
+
+  * As mentioned above, SORT is (usually) destructive and so such
+    combinations as (SORT (REMOVE ...) ...) may not do as you expect
+    (if what you expect is that REMOVE will produce a new list).
+
+  * SORT may not return equal elements in the same order in different
+    CL implementations, because different sorting algorithms are used.
+    To ensure that you get the same result in all implementations, 
+    when that's what you want, use STABLE-SORT (or write your own).
+
+  * The comparison predicate given to SORT is treated as a strict
+    "less than" and so should return NIL when its 1st argument is 
+    considered greater than _or equal to_ its 2nd.
+
+  * If the comparison predicate (strictly speaking, the combination
+    of the predicate and the key function) does not consistently express
+    a total order on the items being sorted, then the items "will be
+    scrambled in some unpredictable way" [CLtL p 408].
+
+    It's easy to go wrong when writing "lexicographic" multi-step
+    comparisons and end up with a predicate that says both A < B 
+    and B < A for some A and B.  For example:
+
+      (defun fg-lessp (a b)
+        (or (< (f a) (f b))    ;first compare f values
+            (< (g a) (g b))))  ;then compare g values
+
+    Fg-lessp does the right thing when (f a) is less than (f b):
+    it returns true -- and when (f a) is equal to (f b): it goes
+    on to compare g values.  But it also compares g values when
+    (f a) is _greater than_ (f b), when what it should do is return
+    false.
+
+    Also make sure the predicate is _transitive_.  For instance,
+    if you're comparing objects of different types and you decide
+    (for example) that numbers are < strings and strings are < symbols,
+    make sure the predicate says numbers are < symbols too.
+
+  * CLtL suggests that using the :KEY argument to SORT may be more
+    efficient than calling the key function inside the comparison
+    predicate (p 408).  However, it may well be less efficient.
+    Implementations may not take advantage of the separate :KEY
+    to extract the keys only once; and the key function might be
+    compiled in-line when it appears inside the predicate.
+
+Function vs eq.
+
+  This issue will not affect many programs, but it can come up when
+  writing certain things that would seem natural in Scheme.  The next
+  section discusses some related issues that are more likely to matter.
+  [For the Scheme account of these issues, see the R4RS section 4.1.1,
+  Lambda expressions, (especially the final sentence) and section 6.2
+  under EQV?.]
+
+  * A FUNCTION special form may construct a new function object each
+    time it's evaluated, and therefore even (flet ((f ...)) (eq #'f #'f))
+    can return false.  The same is true with LABELS instead of FLET
+    and for FUNCTION used with the name of a global function.
+    However, function objects are proper objects-with-identity, and
+    (let ((f #'(lambda ...))) (eq f f)) will always return true.
+
+    It could be argued that the LET and FLET examples above should
+    be equivalent, that the difference is only syntactic.  Scheme
+    programmers, and others, may well _expect_ them to be equivalent
+    (I know I did).  But they (we) would be wrong.
+
+    Whether SYMBOL-FUNCTION can also construct a new object each time
+    it's called is not clear.  Moreover, I haven't find explicit permission
+    in the standard for the behavior of FUNCTION described above.  The
+    only explicit justification I've ever seen cited is CLtL p 118:
+
+      ... a perfectly valid implementation might simply cause every
+      distinct evaluation of a FUNCTION form to produce a new closure
+      object not EQ to any other.
+
+    In context, it's far from clear that this is _meant_ to give such
+    general permission.  All of the examples in the section involve
+    FUNCTION of a LAMBDA-expression and an issue [see the 2nd item
+    in the next Pitfall section below] that would also arise for Scheme.
+    However, e-mail discussion within X3J13 showed substantial support
+    for the view that FUNCTION should be allowed to always create a new
+    object.    
+    
+Iteration vs closures.
+
+  * DO and DO* update the iteration variables by assignment; DOLIST and
+    DOTIMES are allowed to use assignment (rather than a new binding).
+    (All CLtL says of DOLIST and DOTIMES is that the variable "is
+    bound" which has been taken as _not_ implying that there will be
+    separate bindings for each iteration.)
+
+    Consequently, if you make closures over an iteration variable
+    in separate iterations, they may nonetheless be closures over
+    the same binding and hence will all find that the variable has
+    the same value -- whatever value the variable was given last.  Eg,
+
+     (let ((fns '()))
+       (do ((x 1 (1+ x)))
+           ((= x 3))
+         (push #'(lambda () x)
+               fns))
+       (mapcar #'funcall (reverse fns)))
+
+    returns (3 3), not (1 2).  However, it would return (1 2) if
+    #'(lambda () x) were replaced by (let ((x x)) #'(lambda () x)).
+
+  * A related, but distinct, question is whether a loop such as the
+    one above creates two different (ie, not EQ) function objects from
+    #'(lambda () x) or only one.  On this second question, see CLtL
+    pages 117-118.  For the example that returns (3 3) above, where 
+    -- perhaps contrary to the author's intention -- the functions
+    would be "behaviorally identical with respect to invocation",
+    implementations are allowed to create only a single function object.
+
+    This rule appears to apply only to "distinct evaluations of the
+    same function form" [CLtL p 118], not to behaviorally identical
+    functions in general.  However, it applies even if the functions
+    are closures over different bindings.
+
+Limits.
+
+  You should be aware that certain limits exist, even if you think
+  your code won't have to take them into account.
+
+  * The array-total-size-limit may be as small as 1024.
+
+  * Such things as (apply #'append list-of-lists) to flatten a list
+    of lists may run afoul of call-arguments-limit, which can be as
+    small as 50.  In GCL 1.1 (to pick an implementation I have handy),
+    it's 64; so fairly low values can occur.
+
+    Alternatives include:
+
+      (reduce #'append list-of-lists :from-end t)
+
+      (mapcan #'copy-list list-of-lists)
+
+Definitions and declarations.
+
+  * (DEFVAR var init) assigns to the variable only if it does not
+    already have a value.  So if you edit a DEFVAR in a file and
+    reload the file only to find that the value has not changed,
+    this is the reason.  (Cf DEFPARAMETER.)
+
+  * DEFCONSTANT has several potentially unexpected properties:
+
+     - Once a name has been declared constant, it cannot be used a
+       the name of a local variable (lexical or special) or function
+       parameter.  Really.  See page 87 of CLtL II.
+
+     - A DEFCONSTANT cannot be re-evaluated (eg, by reloading the
+       file in which it appears) unless the new value is EQL to the
+       old one.
+
+       Note that the EQL rule makes it difficult to use anything
+       other than numbers, symbols, and characters as constants,
+       especially given the "or both" in the next subitem.
+
+     - When compiling (DEFCONSTANT name form) in a file, the form
+       may be evaluated at compile-time, load-time, or both.  
+
+       (You might think it would be evaluated at compile-time and
+       the _value_ used to obtain the object at load-time, but it
+       doesn't have to work that way.)
+
+  * Internal DEFUNs define global functions, not local ones.
+    Scheme programmers, in particular, may expect otherwise.
+    When the outermost form is not a DEFUN (or, presumably, a
+    DEFMETHOD or DEFGENERIC), some implementations won't compile
+    it (or the function definitions it contains).
+
+  * CLtL says that type declarations apply to names rather than to
+    particular variables (bindings).  Consequently, they can cross
+    lexical scopes.  Eg:
+
+       (let ((x 1))
+	 (declare (fixnum x))
+	 (let ((x ...))
+	   ;; This x must be a fixnum too!
+	   ...))
+
+    There is some doubt that this is what Common Lisp was meant to do,
+    and (so far as I can tell) the ANSI standard disagrees with CLtL;
+    but that is what CLtL II says on page 219.  On my reading of the
+    standard, the fixnum declaration would apply only to the outer X,
+    which is what lexical scope ought to imply.  But given that CLtL
+    explicitly says otherwise, it's possible that some implementations
+    have been misled.
+
+  * You often have to declare the result type to get the most
+    efficient arithmetic.  Eg, 
+
+       (the fixnum (+ (the fixnum e1) (the fixnum e2)))
+
+     rather than
+
+       (+ (the fixnum e1) (the fixnum e2))
+
+  * When calling a function on more than two arguments, remember that
+    there can be intermediate results.  For instance, when adding three
+    fixnums, it's not enough to say only that the _final_ result
+    is a fixnum.  You'll have to break the computation down into
+    2-argument calls.
+
+  * Declaring the iteration variable of a DOTIMES to have type FIXNUM
+    does not guarantee that fixnum arithmetic will be used.  That is,
+    implementations that use fixnum-specific arithmetic in the presence
+    of appropriate declarations may not think _this_ declaration is
+    sufficient.  It may help to declare that the limit is also a
+    fixnum, or you may have to write out the loop as a DO and add
+    appropriate declarations for each operation involved.  (This calls
+    for a macro.)
+
+  * Remember that implementations often use type declarations for
+    optimization rather than for checking.  Adding type declarations
+    can _reduce_ the number of checks.  Different implementations do
+    different things, and their behavior may be affected by OPTIMIZE
+    declarations.
+
+  * PROCLAIM vs DECLAIM: compilers are not required to process top-level
+    calls to PROCLAIM at compile time [CLtL p 223].  This is supposedly a
+    "clarification", rather than a change in the language.  To ensure an
+    effect at compile time, use DECLAIM or put EVAL-WHEN around PROCLAIM.
+    You'll probably want (EVAL-WHEN (COMPILE LOAD EVAL) (PROCLAIM ...)),
+    or whatever the new-style equivalent is [see CLtL pages 88-94].
+
+  * Compile-time side-effects of defining macros (DEFVAR, DEFUN, DECLAIM,
+    etc.) may or may not be visible in the interpreter or in later calls
+    to COMPILE or COMPILE-FILE [CLtL p 689].  That's one reason while
+    files are often loaded right after being compiled, when a sequence
+    of files is being compiled using COMPILE-FILE.  But that practice
+    has its own dangers since it might, for instance, (re)define
+    functions.  That's one reason why you're sometimes advised to put
+    macros and some other kinds of definitions in separate files.
+
+  * INLINE and NOTINLINE [see CLtL, pages 229-230]
+
+     - You should place an INLINE proclamation _before_ the definition
+       of a function you want to have compiled inline.
+
+     - If you want a function to be inline only locally, when there's
+       an INLINE declaration, but not everywhere, you still need an
+       INLINE proclamation.  CLtL p 230 recommends:
+
+          (declaim (inline gnards))
+          (defun gnards ...)
+          (declaim (notinline gnards))
+
+     - You need a NOTINLINE declaration to make sure SETF of SYMBOL-
+       FUNCTION will affect calls between functions defined in the
+       same file.
+
+     - Implementations aren't required to compile anything inline
+       no matter what declarations you use.
+
+Packages
+
+  * During the standardization of Common Lisp, the language was changed
+    in a number of ways that affect package operations.  Many existing
+    programs will break, if the new rules are strictly applied.  However,
+    some implementations have not fully adopted the new rules, and some
+    implementations still support old-style programs in one way or another.
+    This item briefly describes some of the changes.
+
+     - IN-PACKAGE no longer creates the package if it does not already
+       exist.  Moreover, IN-PACKAGE is now a macro rather than a function.
+
+     - In general, only macros and special forms have compile-time effects.
+       That's one reason why IN-PACKAGE is now a macro.  However, other
+       package operations such as IMPORT, EXPORT, and USE-PACKAGE are
+       still functions.  To get the desired effects at compile time,
+       use EVAL-WHEN or put the function calls in a file that you
+       tell the compiler to load.  Use DEFPACKAGE when you can.
+
+     - Instead of the LISP and USER packages, there are packages called
+       COMMON-LISP and COMMON-LISP-USER.
+
+     - There are a number of restrictions on how "conforming programs"
+       can use symbols in the COMMON-LISP package.  See CLtL pages 259-261
+       or section 11.1.2.1.2, pages 11-5 and 11-6 of the ANSI standard.
+
+  * (EXPORT NIL) does not export NIL.  You have to use (EXPORT '(NIL)).
+
+  * If you have a package named P that exports a symbol named P, you
+    won't (in another package) be able to say (USE-PACKAGE 'P).  Instead
+    of 'P you'll have to write "P" or maybe #:P.  ["Why?" is left as
+    an exercise for the reader.]
+
+  * The best order for package operations is _not_ that of the "Put in
+    seven extremely random user interface commands" mnemonic [CLtL p 280].
+    Instead, it's the order used by DEFPACKAGE [p 271].  The change is to
+    put EXPORT last.  Of course, it's often better to just use DEFPACKAGE.
+
+CLOS
+
+  * Shared (i.e., class-allocated) slots of standard classes are not
+    per-(sub)class.  That is, if a class C has a slot S with :ALLOCATION
+    :CLASS, that one slot is used by all instances of C or of subclasses
+    of C, except for subclasses where the slot has been "shadowed"
+    [See CLtL p 779].  To get a per-class slot, you have to explicitly
+    define it for each class.
+
+  * Don't forget, with :AROUND methods, that other :AROUND methods
+    might execute around them.  (E.g., an :AROUND method that
+    recorded run time might not be the outermost one.)  A similar
+    point applies to :BEFORE and :AFTER methods.
+
+  * Don't forget that a method specialized to class C can be called
+    on instances of subclasses of C, or that such a subclass may have
+    ancestors that have no other relation to C.
+
+Acknowledgments
+
+  Andrew Philpot <philpot@isi.edu> for pointing out that CLtL p 408
+  limits the consequences of giving SORT a predicate that does not
+  consistently represent a total order.
+
+  Thorsten Schnier <thorsten@Rincewindarch.su.edu.au> for reminding
+  me that (the ...) does not imply a type check.
+
+End
+
+----------------------------------------------------------------------
+
